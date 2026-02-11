@@ -1,12 +1,15 @@
+import os
+# Force TensorFlow to use legacy Keras (compatible with your .h5 model)
+os.environ['TF_USE_LEGACY_KERAS'] = '1'
+
 import streamlit as st
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.preprocessing import image
 from PIL import Image
 import matplotlib.pyplot as plt
 
 # ------------------------------
-#  CONFIGURATION (must match training)
+#  CONFIGURATION
 # ------------------------------
 IMG_SIZE = 224
 CLASS_NAMES = [
@@ -68,12 +71,25 @@ class FastMedicineRecommender:
 """
 
 # ------------------------------
-#  LOAD MODEL – FIXED & SIMPLE
+#  LOAD MODEL – LEGACY KERAS MODE
 # ------------------------------
 @st.cache_resource
 def load_model():
-    """Load the converted .keras model – works with any TensorFlow version."""
-    model = tf.keras.models.load_model('tomato_model_fast.keras', compile=False)
+    """Load the original .h5 model using legacy Keras (100% compatible)."""
+    model_path = "tomato_model_fast.h5"
+    
+    # If file not found locally, download from GitHub
+    if not os.path.exists(model_path):
+        url = "https://github.com/sce23ec018-a11y/cnn_tomato_disease_prediction_and_medicine_recommendation/raw/main/tomato_model_fast.h5"
+        st.info("📥 Downloading model from GitHub...")
+        import requests
+        response = requests.get(url)
+        with open(model_path, 'wb') as f:
+            f.write(response.content)
+        st.success("✅ Model downloaded!")
+    
+    # Load with legacy Keras – this WILL work on Streamlit Cloud
+    model = tf.keras.models.load_model(model_path, compile=False)
     return model
 
 # ------------------------------
