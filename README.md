@@ -208,8 +208,8 @@ This project is licensed under the **MIT License** – see the [LICENSE](LICENSE
 
 For questions or collaborations, please open an issue on this repository or contact:
 
-**Your Name** – [your.email@example.com](mailto:your.email@example.com)  
-GitHub: [@yourusername](https://github.com/yourusername)
+**Your Name** – sce23ec018@sairamtap.edu.in
+GitHub: https://github.com/sce23ec018-a11y
 
 ---
 
