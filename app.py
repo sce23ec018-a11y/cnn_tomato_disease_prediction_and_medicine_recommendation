@@ -1,13 +1,17 @@
 import streamlit as st
 import numpy as np
 import tensorflow as tf
+from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras import layers, models
 from PIL import Image
 import matplotlib.pyplot as plt
+import os
 
 # ------------------------------
 #  CONFIGURATION
 # ------------------------------
 IMG_SIZE = 224
+NUM_CLASSES = 5
 CLASS_NAMES = [
     'Bacterial_Spot',
     'Early_Blight',
@@ -67,12 +71,47 @@ class FastMedicineRecommender:
 """
 
 # ------------------------------
-#  LOAD MODEL – DIRECT .KERAS (NO DOWNLOAD, NO LEGACY)
+#  REBUILD MODEL & LOAD WEIGHTS – THE ONLY METHOD THAT WORKS
 # ------------------------------
 @st.cache_resource
 def load_model():
-    """Load the converted .keras model – works on TF 2.13+ and 2.20+."""
-    model = tf.keras.models.load_model('tomato_model_fast.keras', compile=False)
+    """Rebuild MobileNetV2 architecture and load weights from .h5 file."""
+    
+    # ---- Step 1: Rebuild the exact architecture ----
+    base_model = MobileNetV2(
+        input_shape=(IMG_SIZE, IMG_SIZE, 3),
+        include_top=False,
+        weights=None,          # We'll load our own weights
+        alpha=0.35            # Matches the fast training version
+    )
+    
+    model = models.Sequential([
+        base_model,
+        layers.GlobalAveragePooling2D(),
+        layers.Dropout(0.3),
+        layers.Dense(128, activation='relu'),
+        layers.Dropout(0.2),
+        layers.Dense(NUM_CLASSES, activation='softmax')
+    ])
+    
+    # ---- Step 2: Build the model to create weights ----
+    model.build(input_shape=(None, IMG_SIZE, IMG_SIZE, 3))
+    
+    # ---- Step 3: Get the .h5 file (download if missing) ----
+    h5_path = "tomato_model_fast.h5"
+    
+    # If file doesn't exist locally, download from GitHub
+    if not os.path.exists(h5_path):
+        url = "https://github.com/sce23ec018-a11y/cnn_tomato_disease_prediction_and_medicine_recommendation/raw/main/tomato_model_fast.h5"
+        with st.spinner("📥 Downloading model weights..."):
+            import requests
+            response = requests.get(url)
+            with open(h5_path, 'wb') as f:
+                f.write(response.content)
+    
+    # ---- Step 4: Load weights into the rebuilt model ----
+    model.load_weights(h5_path)
+    
     return model
 
 # ------------------------------
@@ -112,7 +151,7 @@ def main():
     for cls in CLASS_NAMES:
         st.sidebar.write(f"- {cls}")
     
-    with st.spinner("Loading AI model... ⏳"):
+    with st.spinner("Building model and loading weights... ⏳"):
         model = load_model()
     st.success("Model loaded successfully!")
     
