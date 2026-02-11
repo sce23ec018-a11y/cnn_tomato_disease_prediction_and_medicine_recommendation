@@ -1,16 +1,14 @@
 import streamlit as st
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.applications import MobileNetV2
-from tensorflow.keras import layers, models
+from tensorflow.keras.preprocessing import image
 from PIL import Image
 import matplotlib.pyplot as plt
 
 # ------------------------------
-#  CONFIGURATION
+#  CONFIGURATION (must match training)
 # ------------------------------
 IMG_SIZE = 224
-NUM_CLASSES = 5
 CLASS_NAMES = [
     'Bacterial_Spot',
     'Early_Blight',
@@ -70,45 +68,13 @@ class FastMedicineRecommender:
 """
 
 # ------------------------------
-#  LOAD MODEL & CLASS MAPPING – FIXED!
+#  LOAD MODEL – FIXED & SIMPLE
 # ------------------------------
 @st.cache_resource
-def load_model_and_mapping():
-    """Build model layer by layer, then load weights."""
-    
-    # ---------- Build model explicitly ----------
-    model = models.Sequential()
-    
-    # Add MobileNetV2 base (with correct input shape)
-    model.add(MobileNetV2(
-        input_shape=(IMG_SIZE, IMG_SIZE, 3),
-        include_top=False,
-        weights=None,
-        alpha=0.35
-    ))
-    
-    # Add custom top layers
-    model.add(layers.GlobalAveragePooling2D())
-    model.add(layers.Dropout(0.3))
-    model.add(layers.Dense(128, activation='relu'))
-    model.add(layers.Dropout(0.2))
-    model.add(layers.Dense(NUM_CLASSES, activation='softmax'))
-    
-    # 🔥 CRITICAL: Build the model so it has layers
-    model.build(input_shape=(None, IMG_SIZE, IMG_SIZE, 3))
-    
-    # ---------- Load weights ----------
-    model.load_weights('tomato_model_fast.h5')
-    
-    # ---------- Load class mapping ----------
-    try:
-        class_mapping = np.load('class_mapping.npy', allow_pickle=True).item()
-    except FileNotFoundError:
-        # Create mapping from CLASS_NAMES if file missing
-        class_mapping = {i: name for i, name in enumerate(CLASS_NAMES)}
-        np.save('class_mapping.npy', class_mapping)
-    
-    return model, class_mapping
+def load_model():
+    """Load the converted .keras model – works with any TensorFlow version."""
+    model = tf.keras.models.load_model('tomato_model_fast.keras', compile=False)
+    return model
 
 # ------------------------------
 #  IMAGE PREPROCESSING
@@ -123,10 +89,10 @@ def preprocess_image(uploaded_img):
 # ------------------------------
 #  PREDICTION
 # ------------------------------
-def predict(image_array, model, class_mapping):
+def predict(image_array, model):
     predictions = model.predict(image_array, verbose=0)[0]
     top_indices = np.argsort(predictions)[::-1][:3]
-    top_classes = [class_mapping[i] for i in top_indices]
+    top_classes = [CLASS_NAMES[i] for i in top_indices]
     top_confidences = predictions[top_indices]
     return top_classes, top_confidences, predictions
 
@@ -148,7 +114,7 @@ def main():
         st.sidebar.write(f"- {cls}")
     
     with st.spinner("Loading AI model... ⏳"):
-        model, class_mapping = load_model_and_mapping()
+        model = load_model()
     st.success("Model loaded successfully!")
     
     uploaded_file = st.file_uploader("Choose a tomato leaf image...", type=["jpg", "jpeg", "png"])
@@ -160,7 +126,7 @@ def main():
         
         with st.spinner("Analyzing image..."):
             img_array, display_img = preprocess_image(uploaded_file)
-            top_classes, top_confidences, all_preds = predict(img_array, model, class_mapping)
+            top_classes, top_confidences, all_preds = predict(img_array, model)
         
         with col2:
             st.subheader("🔬 Prediction Results")
