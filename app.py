@@ -7,7 +7,7 @@ from PIL import Image
 import matplotlib.pyplot as plt
 
 # ------------------------------
-#  CONFIGURATION (must match training)
+#  CONFIGURATION
 # ------------------------------
 IMG_SIZE = 224
 NUM_CLASSES = 5
@@ -70,34 +70,43 @@ class FastMedicineRecommender:
 """
 
 # ------------------------------
-#  LOAD MODEL & CLASS MAPPING (FIXED!)
+#  LOAD MODEL & CLASS MAPPING – FIXED!
 # ------------------------------
 @st.cache_resource
 def load_model_and_mapping():
-    """Rebuild architecture and load weights – works with any TensorFlow version."""
+    """Build model layer by layer, then load weights."""
     
-    # ---------- Rebuild the exact MobileNetV2 architecture ----------
-    base_model = MobileNetV2(
+    # ---------- Build model explicitly ----------
+    model = models.Sequential()
+    
+    # Add MobileNetV2 base (with correct input shape)
+    model.add(MobileNetV2(
         input_shape=(IMG_SIZE, IMG_SIZE, 3),
         include_top=False,
-        weights=None,          # We'll load custom weights
-        alpha=0.35            # Matches your fast model
-    )
+        weights=None,
+        alpha=0.35
+    ))
     
-    model = models.Sequential([
-        base_model,
-        layers.GlobalAveragePooling2D(),
-        layers.Dropout(0.3),
-        layers.Dense(128, activation='relu'),
-        layers.Dropout(0.2),
-        layers.Dense(NUM_CLASSES, activation='softmax')
-    ])
+    # Add custom top layers
+    model.add(layers.GlobalAveragePooling2D())
+    model.add(layers.Dropout(0.3))
+    model.add(layers.Dense(128, activation='relu'))
+    model.add(layers.Dropout(0.2))
+    model.add(layers.Dense(NUM_CLASSES, activation='softmax'))
     
-    # ---------- Load weights from your .h5 file ----------
+    # 🔥 CRITICAL: Build the model so it has layers
+    model.build(input_shape=(None, IMG_SIZE, IMG_SIZE, 3))
+    
+    # ---------- Load weights ----------
     model.load_weights('tomato_model_fast.h5')
     
     # ---------- Load class mapping ----------
-    class_mapping = np.load('class_mapping.npy', allow_pickle=True).item()
+    try:
+        class_mapping = np.load('class_mapping.npy', allow_pickle=True).item()
+    except FileNotFoundError:
+        # Create mapping from CLASS_NAMES if file missing
+        class_mapping = {i: name for i, name in enumerate(CLASS_NAMES)}
+        np.save('class_mapping.npy', class_mapping)
     
     return model, class_mapping
 
