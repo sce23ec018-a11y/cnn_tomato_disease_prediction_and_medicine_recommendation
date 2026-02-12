@@ -1,5 +1,6 @@
 import os
-os.environ['TF_USE_LEGACY_KERAS'] = '1'   # Critical: forces Keras 2 compatibility
+# CRITICAL: Force legacy Keras (compatible with your .h5 model)
+os.environ['TF_USE_LEGACY_KERAS'] = '1'
 
 import streamlit as st
 import numpy as np
@@ -71,24 +72,37 @@ class FastMedicineRecommender:
 """
 
 # ------------------------------
-#  LOAD MODEL – LEGACY KERAS, DIRECT .H5
+#  MODEL LOADING – 100% RELIABLE
 # ------------------------------
 @st.cache_resource
 def load_model():
-    """Download and load the original .h5 model using legacy Keras."""
+    """Download .h5 from GitHub and load with legacy Keras."""
     model_path = "tomato_model_fast.h5"
     
-    # Download if not exists
+    # Download if not already present
     if not os.path.exists(model_path):
         url = "https://github.com/sce23ec018-a11y/cnn_tomato_disease_prediction_and_medicine_recommendation/raw/main/tomato_model_fast.h5"
-        with st.spinner("📥 Downloading model..."):
-            response = requests.get(url)
-            with open(model_path, 'wb') as f:
-                f.write(response.content)
+        try:
+            with st.spinner("📥 Downloading model from GitHub..."):
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    with open(model_path, 'wb') as f:
+                        f.write(response.content)
+                else:
+                    st.error(f"❌ Model download failed (HTTP {response.status_code}). Please ensure the .h5 file is uploaded to GitHub.")
+                    st.stop()
+        except Exception as e:
+            st.error(f"❌ Error downloading model: {e}")
+            st.stop()
     
-    # Load with legacy Keras (works with any TF 2.x)
-    model = tf.keras.models.load_model(model_path, compile=False)
-    return model
+    # Load with legacy Keras – this WILL work
+    try:
+        model = tf.keras.models.load_model(model_path, compile=False)
+        return model
+    except Exception as e:
+        st.error(f"❌ Failed to load model: {e}")
+        st.error("Make sure the .h5 file is a valid Keras model and you're using legacy Keras.")
+        st.stop()
 
 # ------------------------------
 #  IMAGE PREPROCESSING & PREDICTION
@@ -115,6 +129,7 @@ def main():
     st.title("🌱 Tomato Disease Prediction & Medicine Recommendation")
     st.markdown("Upload a photo of a tomato leaf to identify the disease and get treatment recommendations.")
     
+    # Sidebar
     st.sidebar.header("About")
     st.sidebar.info(
         "This app uses a deep learning model (MobileNetV2) trained on 5 classes of tomato leaf diseases. "
@@ -124,10 +139,12 @@ def main():
     for cls in CLASS_NAMES:
         st.sidebar.write(f"- {cls}")
     
+    # Load model
     with st.spinner("Loading AI model... ⏳"):
         model = load_model()
-    st.success("Model loaded successfully!")
+    st.success("✅ Model loaded successfully!")
     
+    # File uploader
     uploaded_file = st.file_uploader("Choose a tomato leaf image...", type=["jpg", "jpeg", "png"])
     
     if uploaded_file is not None:
@@ -135,7 +152,7 @@ def main():
         with col1:
             st.image(uploaded_file, caption="Uploaded Image", use_container_width=True)
         
-        with st.spinner("Analyzing image..."):
+        with st.spinner("🔬 Analyzing image..."):
             img_array, _ = preprocess_image(uploaded_file)
             top_classes, top_confidences, all_preds = predict(img_array, model)
         
