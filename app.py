@@ -76,46 +76,99 @@ class FastMedicineRecommender:
 # ------------------------------
 @st.cache_resource
 def load_model():
-    """Download .h5 from GitHub and load with legacy Keras."""
-    model_path = "tomato_model_fast.h5"
+    """Download models and load with fallback strategy - prioritize ONNX for compatibility."""
     
-    # Download if not already present
-    if not os.path.exists(model_path):
-        url = "https://github.com/sce23ec018-a11y/cnn_tomato_disease_prediction_and_medicine_recommendation/raw/main/tomato_model_fast.h5"
+    # Try ONNX first (most compatible)
+    onnx_path = "tomato_model_fast.onnx"
+    h5_path = "tomato_model_fast.h5"
+    
+    # Download ONNX model if not present
+    if not os.path.exists(onnx_path):
+        url = "https://github.com/sce23ec018-a11y/cnn_tomato_disease_prediction_and_medicine_recommendation/raw/main/tomato_model_fast.onnx"
         try:
-            with st.spinner("📥 Downloading model from GitHub..."):
+            with st.spinner("📥 Downloading ONNX model..."):
                 response = requests.get(url, timeout=10)
                 if response.status_code == 200:
-                    with open(model_path, 'wb') as f:
+                    with open(onnx_path, 'wb') as f:
                         f.write(response.content)
                 else:
-                    st.error(f"❌ Model download failed (HTTP {response.status_code}). Please ensure the .h5 file is uploaded to GitHub.")
+                    st.error(f"❌ ONNX model download failed (HTTP {response.status_code})")
+        except Exception as e:
+            st.error(f"❌ Error downloading ONNX model: {e}")
+    
+    # Load ONNX model
+    if os.path.exists(onnx_path):
+        try:
+            import onnxruntime as ort
+            session = ort.InferenceSession(onnx_path)
+            st.session_state['onnx_session'] = session
+            st.session_state['using_onnx'] = True
+            st.success("✅ ONNX model loaded successfully!")
+            return None  # Return None since we're using ONNX
+        except Exception as e:
+            st.warning(f"⚠️ ONNX model failed to load: {e}")
+    
+    # Fallback to H5 model
+    if not os.path.exists(h5_path):
+        url = "https://github.com/sce23ec018-a11y/cnn_tomato_disease_prediction_and_medicine_recommendation/raw/main/tomato_model_fast.h5"
+        try:
+            with st.spinner("📥 Downloading H5 model..."):
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    with open(h5_path, 'wb') as f:
+                        f.write(response.content)
+                else:
+                    st.error(f"❌ H5 model download failed (HTTP {response.status_code})")
                     st.stop()
         except Exception as e:
-            st.error(f"❌ Error downloading model: {e}")
+            st.error(f"❌ Error downloading H5 model: {e}")
             st.stop()
     
-    # Load with legacy Keras – this WILL work
+    # Try loading H5 model with multiple approaches
     try:
-        model = tf.keras.models.load_model(model_path, compile=False)
+        model = tf.keras.models.load_model(h5_path, compile=False)
+        st.success("✅ H5 model loaded successfully!")
         return model
     except Exception as e:
-        st.error(f"❌ Failed to load model: {e}")
-        st.error("Make sure the .h5 file is a valid Keras model and you're using legacy Keras.")
+        st.warning(f"⚠️ H5 model loading failed: {e}")
+        st.error("❌ All model loading attempts failed. Please check model files.")
         st.stop()
 
 # ------------------------------
 #  IMAGE PREPROCESSING & PREDICTION
 # ------------------------------
 def preprocess_image(uploaded_img):
+    """Enhanced preprocessing matching training exactly."""
     img = Image.open(uploaded_img).convert('RGB')
-    img = img.resize((IMG_SIZE, IMG_SIZE))
-    img_array = np.array(img) / 255.0
+    img = img.resize((IMG_SIZE, IMG_SIZE), Image.Resampling.LANCZOS)  # High-quality resizing
+    img_array = np.array(img, dtype=np.float32) / 255.0  # Explicit float32
     img_array = np.expand_dims(img_array, axis=0)
     return img_array, img
 
 def predict(image_array, model):
-    predictions = model.predict(image_array, verbose=0)[0]
+    """Optimized prediction with proper data type handling."""
+    # Check if using ONNX model
+    if 'using_onnx' in st.session_state and st.session_state['using_onnx']:
+        onnx_session = st.session_state['onnx_session']
+        input_name = onnx_session.get_inputs()[0].name
+        input_type = onnx_session.get_inputs()[0].type
+        
+        # Convert to correct data type
+        if input_type == 'tensor(float16)':
+            input_data = image_array.astype(np.float16)
+        else:
+            input_data = image_array.astype(np.float32)
+        
+        # Run inference
+        predictions = onnx_session.run(None, {input_name: input_data})[0][0]
+    else:
+        # TensorFlow model prediction
+        predictions = model.predict(image_array, verbose=0)[0]
+    
+    # Apply softmax for better probability distribution (if needed)
+    if abs(np.sum(predictions) - 1.0) > 0.01:  # If not already softmaxed
+        predictions = tf.nn.softmax(predictions).numpy()
+    
     top_indices = np.argsort(predictions)[::-1][:3]
     top_classes = [CLASS_NAMES[i] for i in top_indices]
     top_confidences = predictions[top_indices]
@@ -154,7 +207,9 @@ def main():
         
         with st.spinner("🔬 Analyzing image..."):
             img_array, _ = preprocess_image(uploaded_file)
-            top_classes, top_confidences, all_preds = predict(img_array, model)
+            # Pass model only if not using ONNX
+            model_to_use = None if ('using_onnx' in st.session_state and st.session_state['using_onnx']) else model
+            top_classes, top_confidences, all_preds = predict(img_array, model_to_use)
         
         with col2:
             st.subheader("🔬 Prediction Results")
